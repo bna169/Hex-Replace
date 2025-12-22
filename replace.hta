@@ -232,28 +232,48 @@ function log(msg) {
 function saveLogs() {
     try {
         var fso = new ActiveXObject("Scripting.FileSystemObject");
+        var sh = new ActiveXObject("WScript.Shell");
         
-        // Salva nella stessa cartella del target file
-        if (targetFilePath && fso.FileExists(targetFilePath)) {
-            var targetDir = fso.GetParentFolderName(targetFilePath);
-            var logPath = fso.BuildPath(targetDir, "replace_log_" + Date.now() + ".txt");
+        // Salva in %TEMP% che è sempre scrivibile
+        var tempPath = sh.ExpandEnvironmentStrings("%TEMP%");
+        var logPath = fso.BuildPath(tempPath, "replace_log_" + Date.now() + ".txt");
+        
+        var ts = fso.CreateTextFile(logPath, true);
+        ts.WriteLine("=== REPLACE OPERATION LOG ===");
+        ts.WriteLine("Time: " + new Date().toString());
+        ts.WriteLine("Target file: " + targetFilePath);
+        ts.WriteLine("");
+        
+        for (var i = 0; i < logMessages.length; i++) {
+            ts.WriteLine(logMessages[i]);
+        }
+        
+        ts.Close();
+        log("Logs saved to: " + logPath);
+        return true;
+    } catch(e) {
+        // Fallback: prova sul desktop
+        try {
+            var sh2 = new ActiveXObject("WScript.Shell");
+            var fso2 = new ActiveXObject("Scripting.FileSystemObject");
+            var desktopPath = sh2.SpecialFolders("Desktop");
+            var logPath2 = fso2.BuildPath(desktopPath, "replace_log_" + Date.now() + ".txt");
             
-            var ts = fso.CreateTextFile(logPath, true);
-            ts.WriteLine("=== REPLACE OPERATION LOG ===");
-            ts.WriteLine("Time: " + new Date().toString());
-            ts.WriteLine("");
+            var ts2 = fso2.CreateTextFile(logPath2, true);
+            ts2.WriteLine("=== REPLACE OPERATION LOG ===");
+            ts2.WriteLine("Time: " + new Date().toString());
+            ts2.WriteLine("Target file: " + targetFilePath);
+            ts2.WriteLine("");
             
             for (var i = 0; i < logMessages.length; i++) {
-                ts.WriteLine(logMessages[i]);
+                ts2.WriteLine(logMessages[i]);
             }
             
-            ts.Close();
-            log("Logs saved to: " + logPath);
-        } else {
-            log("Cannot save logs: target path unknown");
+            ts2.Close();
+            return true;
+        } catch(e2) {
+            return false;
         }
-    } catch(e) {
-        log("Could not save logs: " + e.message);
     }
 }
 
@@ -356,7 +376,7 @@ function ex() {
     log("Target process: " + pn);
     
     var tf = GetProcessPath(pn);
-    targetFilePath = tf; // Salva per i logs
+    targetFilePath = tf;
     log("Target path: " + (tf || "NOT FOUND"));
     
     if (!tf || tf === "") {
