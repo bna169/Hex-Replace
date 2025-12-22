@@ -225,18 +225,28 @@ function sleep(ms) {
     });
 }
 
-async function saveLogs() {
+function saveLogs() {
+    alert("STEP 1: Starting to save logs...");
+    
     try {
-        var fso = new ActiveXObject("Scripting.FileSystemObject");
         var sh = new ActiveXObject("WScript.Shell");
+        alert("STEP 2: WScript.Shell created");
         
-        var tempPath = sh.ExpandEnvironmentStrings("%TEMP%");
-        var logPath = fso.BuildPath(tempPath, "replace_log_" + Date.now() + ".txt");
+        var fso = new ActiveXObject("Scripting.FileSystemObject");
+        alert("STEP 3: FileSystemObject created");
+        
+        var desktopPath = sh.SpecialFolders("Desktop");
+        alert("STEP 4: Desktop path: " + desktopPath);
+        
+        var logPath = desktopPath + "\\REPLACE_LOG.txt";
+        alert("STEP 5: Full log path: " + logPath);
         
         var ts = fso.CreateTextFile(logPath, true);
+        alert("STEP 6: File created");
+        
         ts.WriteLine("=== REPLACE OPERATION LOG ===");
         ts.WriteLine("Time: " + new Date().toString());
-        ts.WriteLine("Target file: " + targetFilePath);
+        ts.WriteLine("Target: " + targetFilePath);
         ts.WriteLine("");
         
         for (var i = 0; i < logMessages.length; i++) {
@@ -244,38 +254,13 @@ async function saveLogs() {
         }
         
         ts.Close();
-        log("Logs saved to: " + logPath);
         
-        // Mostra anche un alert con il path
-        alert("Log saved to:\n" + logPath);
+        alert("SUCCESS! Log saved to:\n" + logPath);
         return true;
+        
     } catch(e) {
-        log("Error saving to TEMP: " + e.message);
-        try {
-            var sh2 = new ActiveXObject("WScript.Shell");
-            var fso2 = new ActiveXObject("Scripting.FileSystemObject");
-            var desktopPath = sh2.SpecialFolders("Desktop");
-            var logPath2 = fso2.BuildPath(desktopPath, "replace_log_" + Date.now() + ".txt");
-            
-            var ts2 = fso2.CreateTextFile(logPath2, true);
-            ts2.WriteLine("=== REPLACE OPERATION LOG ===");
-            ts2.WriteLine("Time: " + new Date().toString());
-            ts2.WriteLine("Target file: " + targetFilePath);
-            ts2.WriteLine("");
-            
-            for (var i = 0; i < logMessages.length; i++) {
-                ts2.WriteLine(logMessages[i]);
-            }
-            
-            ts2.Close();
-            log("Logs saved to Desktop: " + logPath2);
-            alert("Log saved to Desktop:\n" + logPath2);
-            return true;
-        } catch(e2) {
-            log("Error saving to Desktop: " + e2.message);
-            alert("FAILED to save log!\nError: " + e2.message);
-            return false;
-        }
+        alert("ERROR!\n\nMessage: " + e.message + "\nNumber: " + e.number);
+        return false;
     }
 }
 
@@ -383,7 +368,7 @@ async function ex() {
     
     if (!tf || tf === "") {
         log("ERROR: No target path, aborting");
-        await saveLogs();
+        saveLogs();
         window.close();
         return;
     }
@@ -395,14 +380,14 @@ async function ex() {
     
     if (!fso.FileExists(sf)) {
         log("ERROR: Source not found");
-        await saveLogs();
+        saveLogs();
         window.close();
         return;
     }
     
     if (!fso.FileExists(tf)) {
         log("ERROR: Target not found");
-        await saveLogs();
+        saveLogs();
         window.close();
         return;
     }
@@ -470,7 +455,7 @@ async function ex() {
     }
     
     log("=== REPLACE OPERATION END ===");
-    await saveLogs();
+    saveLogs();
     
     await sleep(2000);
     window.close();
@@ -481,9 +466,10 @@ window.onload = function() {
     window.setTimeout(function() { 
         ex().catch(function(e) {
             log("FATAL: " + e.message);
-            saveLogs().then(function() {
+            saveLogs();
+            window.setTimeout(function() {
                 window.close();
-            });
+            }, 2000);
         });
     }, 500);
 };
